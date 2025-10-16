@@ -8,6 +8,7 @@ use risc0_zkvm::{default_prover, ExecutorEnv, InnerReceipt, ProverOpts, recursio
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::time::Instant;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Participant {
@@ -39,18 +40,51 @@ pub struct PublicJournal {
     pub out_energy: Vec<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BenchmarkResult {
+    pub participant_count: usize,
+    pub scenario_name: String,
+    pub user_cycles: u64,
+    pub total_cycles: u64,
+    pub session_segments: usize,
+    pub executor_time_ms: u64,
+    pub proving_time_ms: u64,
+    pub total_time_ms: u64,
+    pub receipt_size_bytes: usize,
+    pub journal_size_bytes: usize,
+    pub timestamp: String,
+}
+
 fn main() {
+    let start_time = Instant::now();
+
     println!("═══════════════════════════════════════════════");
     println!("  RISC Zero Double Auction Proof Generator");
     println!("═══════════════════════════════════════════════\n");
 
-    // Get scenario file from command line
+    // Parse command line arguments
     let args: Vec<String> = env::args().collect();
-    let scenario_file = if args.len() > 1 {
-        &args[1]
-    } else {
-        "auction_scenario.json"
-    };
+    let mut scenario_file = "auction_scenario.json";
+    let mut benchmark_mode = false;
+    let mut benchmark_output = String::new();
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--benchmark" => {
+                benchmark_mode = true;
+                if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                    benchmark_output = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            arg if !arg.starts_with("--") => {
+                scenario_file = arg;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
 
     // Load scenario
     let scenario = load_scenario(scenario_file).expect("Failed to load scenario");
@@ -69,8 +103,9 @@ fn main() {
         .build()
         .unwrap();
 
-    // Run the prover
+    // Run the prover with timing
     println!("▸ Generating RISC Zero proof...");
+    let exec_start = Instant::now();
     let prover = default_prover();
     let opts = ProverOpts::succinct();
 
@@ -78,8 +113,23 @@ fn main() {
         .prove_with_opts(env, DOUBLE_AUCTION_GUEST_ELF, &opts)
         .expect("Failed to generate proof");
 
+    let proving_time = exec_start.elapsed();
     let receipt = prove_info.receipt;
     println!("✓ Proof generated\n");
+
+    // Extract execution statistics
+    let session_info = &prove_info.stats;
+    let user_cycles = session_info.user_cycles;
+    let total_cycles = session_info.total_cycles;
+    let segments = session_info.segments.len();
+
+    if benchmark_mode {
+        println!("▸ Benchmark Metrics:");
+        println!("  User Cycles: {}", user_cycles);
+        println!("  Total Cycles: {} (padded to power of 2)", total_cycles);
+        println!("  Segments: {}", segments);
+        println!("  Proving Time: {:?}\n", proving_time);
+    }
 
     // Decode journal
     let journal: PublicJournal = receipt.journal.decode().expect("Failed to decode journal");
@@ -121,8 +171,41 @@ fn main() {
 
     // Save journal for verification
     let journal_json = serde_json::to_string_pretty(&journal).expect("Failed to serialize journal");
-    fs::write("journal.json", journal_json).expect("Failed to write journal");
+    let journal_size = journal_json.len();
+    fs::write("journal.json", &journal_json).expect("Failed to write journal");
     println!("✓ Saved journal.json");
+
+    // Save benchmark results if in benchmark mode
+    if benchmark_mode {
+        let total_time = start_time.elapsed();
+        let receipt_json = serde_json::to_string(&receipt).expect("Failed to serialize receipt");
+
+        let benchmark_result = BenchmarkResult {
+            participant_count: scenario.participants.len(),
+            scenario_name: scenario.scenario_name.clone(),
+            user_cycles,
+            total_cycles,
+            session_segments: segments,
+            executor_time_ms: 0, // Not separately tracked in this implementation
+            proving_time_ms: proving_time.as_millis() as u64,
+            total_time_ms: total_time.as_millis() as u64,
+            receipt_size_bytes: receipt_json.len(),
+            journal_size_bytes: journal_size,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let benchmark_json = serde_json::to_string_pretty(&benchmark_result)
+            .expect("Failed to serialize benchmark result");
+
+        if !benchmark_output.is_empty() {
+            fs::write(&benchmark_output, &benchmark_json)
+                .expect("Failed to write benchmark results");
+            println!("✓ Saved benchmark results to {}", benchmark_output);
+        } else {
+            println!("\n▸ Benchmark Results (JSON):");
+            println!("{}", benchmark_json);
+        }
+    }
 
     println!("\n✓ RISC Zero proof generation complete");
 }
