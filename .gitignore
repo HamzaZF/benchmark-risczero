@@ -1,0 +1,57 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo lock file
+# Uncomment the line below if this is a library crate
+# For applications/binaries, you may want to commit Cargo.lock
+Cargo.lock
+
+# RISC Zero build artifacts
+methods/guest/target/
+*.img
+
+# Output files
+*.json
+!Cargo.json
+
+# Rust debug and release builds
+debug/
+release/
+
+# Backup files
+*.bak
+*.swp
+*.swo
+*~
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+*.sublime-*
+.vs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Rust profiling
+perf.data
+perf.data.old
+*.profdata
+
+# Testing artifacts
+/tmp/
+
+# Environment files
+.env
+.env.local
